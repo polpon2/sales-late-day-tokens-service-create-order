@@ -8,6 +8,7 @@ class Order(Base):
     __tablename__ = "orders"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255))
-    inventory_uuid = Column(String(255))
-    total_purchase = Column(Integer, default=0)
+    token_name = Column(String(255))
+    amount = Column(Integer)
+    
 

@@ -15,28 +15,22 @@ from db.engine import SessionLocal, engine
 
 
 load_dotenv()
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
 
 
 def callback(ch, method, properties, body):
     body: dict = json.loads(body)
 
     username: str = body['username']
-    user_credit: int = body['user_credit']
-    inventory_uuid: int = body['inventory_uuid']
-    pirce: int = body['pirce']
-    amout: int = body['amout']
+    token_name: str = body['token_name']
+    amount: int = body['amount']
+
 
     print(f" [x] Received {body}")
 
     # Create Order.
     db: Session = SessionLocal()
-    crud.create_order(db=db, username=username, inventory_uuid=inventory_uuid, total_purchase=amout * pirce)
+    crud.create_order(db=db, username=username, token_name=token_name, amount=amount)
     print(f"create order")
 
     ch.queue_declare(queue='from.order')
