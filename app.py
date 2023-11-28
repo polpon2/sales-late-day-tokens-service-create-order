@@ -15,8 +15,6 @@ from db.engine import SessionLocal, engine
 
 
 load_dotenv()
-models.Base.metadata.create_all(bind=engine)
-
 
 
 def callback(ch, method, properties, body):
@@ -52,6 +50,8 @@ def main():
         connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbit-mq', port=5672))
     except:
         connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
+
+    models.Base.metadata.create_all(bind=engine)
 
     channel = connection.channel()
 
