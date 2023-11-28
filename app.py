@@ -1,77 +1,71 @@
-from typing import List
-import pika, sys, os, json
-from dotenv import load_dotenv
-
-import os
-from requests import Session
-
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-
-from db import crud, models
+import asyncio, aio_pika, json
 from db.engine import SessionLocal, engine
+from db import crud, models
+
+async def process_message(
+    message: aio_pika.abc.AbstractIncomingMessage,
+    connection: aio_pika.Connection,  # Add connection parameter
+) -> None:
+    async with message.process():
+        body: dict = json.loads(message.body)
+
+        username: str = body['username']
+        token_name: str = body['token_name']
+        amount: int = body['amount']
+
+        print(f" [x] Received {body}")
+
+        # Create Order.
+        async with SessionLocal() as db:
+            await crud.create_order(db=db, username=username, token_name=token_name, amount=amount)
+            print(f"create order")
+
+        routing_key = "from.order"
+
+        channel = await connection.channel()
+
+        await channel.default_exchange.publish(
+            aio_pika.Message(body=message.body),
+            routing_key=routing_key,
+        )
 
 
+async def main() -> None:
+    connection = await aio_pika.connect_robust(
+        "amqp://localhost",
+    )
 
-load_dotenv()
-
-
-def callback(ch, method, properties, body):
-    body: dict = json.loads(body)
-
-    username: str = body['username']
-    token_name: str = body['token_name']
-    amount: int = body['amount']
-
-
-    print(f" [x] Received {body}")
-
-    # Create Order.
-    db: Session = SessionLocal()
-    crud.create_order(db=db, username=username, token_name=token_name, amount=amount)
-    print(f"create order")
-
-    ch.queue_declare(queue='from.order')
-
-    ch.basic_publish(exchange='',
-                        routing_key='from.order',
-                        body=json.dumps(body))
-
-    print(f" [x] Sent {json.dumps(body)}")
-
-    ch.basic_ack(delivery_tag=method.delivery_tag)
-
-    return
+    # Init the tables in db
+    async with engine.begin() as conn:
+        await conn.run_sync(models.Base.metadata.drop_all) # Reset every time
+        await conn.run_sync(models.Base.metadata.create_all)
 
 
-def main():
-    try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbit-mq', port=5672))
-    except:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
+    queue_name = "to.order"
 
-    models.Base.metadata.create_all(bind=engine)
+    # Creating channel
+    channel = await connection.channel()
 
-    channel = connection.channel()
+    # Maximum message count which will be processing at the same time.
+    await channel.set_qos(prefetch_count=10)
 
-    channel.queue_declare(queue='to.order', arguments={
-                          'x-message-ttl' : 1000,
-                          'x-dead-letter-exchange' : 'dlx',
-                          'x-dead-letter-routing-key' : 'dl'
-                          })
-
-    channel.basic_consume(queue='to.order', on_message_callback=callback)
+    # Declaring queue
+    queue = await channel.declare_queue(queue_name, arguments={
+                                                    'x-message-ttl' : 1000,
+                                                    'x-dead-letter-exchange' : 'dlx',
+                                                    'x-dead-letter-routing-key' : 'dl'
+                                                    })
 
     print(' [*] Waiting for messages. To exit press CTRL+C')
-    channel.start_consuming()
 
-if __name__ == '__main__':
+    await queue.consume(lambda message: process_message(message, connection))
+
     try:
-        main()
-    except KeyboardInterrupt:
-        print('Interrupted')
-        try:
-            sys.exit(0)
-        except SystemExit:
-            os._exit(0)
+        # Wait until terminate
+        await asyncio.Future()
+    finally:
+        await connection.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
