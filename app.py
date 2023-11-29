@@ -10,14 +10,13 @@ async def process_message(
         body: dict = json.loads(message.body)
 
         username: str = body['username']
-        token_name: str = body['token_name']
         amount: int = body['amount']
 
         print(f" [x] Received {body}")
 
         # Create Order.
         async with SessionLocal() as db:
-            await crud.create_order(db=db, username=username, token_name=token_name, amount=amount)
+            await crud.create_order(db=db, username=username, amount=amount)
             print(f"create order")
 
         routing_key = "from.order"
@@ -32,7 +31,7 @@ async def process_message(
 
 async def main() -> None:
     connection = await aio_pika.connect_robust(
-        "amqp://localhost",
+        "amqp://rabbit-mq",
     )
 
     # Init the tables in db

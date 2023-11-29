@@ -8,11 +8,10 @@ class Order(Base):
     __tablename__ = "orders"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255))
-    token_name = Column(String(255))
     amount = Column(Integer)
     status = Column(String(255));
 
     def __repr__(self):
-        return f"<Order(username={self.username}, token_name={self.token_name}, amount={self.amount}, status={self.status})>"
+        return f"<Order(username={self.username}, amount={self.amount}, status={self.status})>"
 
 

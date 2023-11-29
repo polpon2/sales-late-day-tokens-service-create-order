@@ -14,8 +14,8 @@ from . import models
 #     return db_order
 
 
-async def create_order(db: AsyncSession, username: str, token_name: str, amount: int):
-    db_order = models.Order(username=username, token_name=token_name, amount=amount, status="Processing")
+async def create_order(db: AsyncSession, username: str, amount: int):
+    db_order = models.Order(username=username, amount=amount, status="Processing")
     async with db.begin():
         db.add(db_order)
         await db.flush()
