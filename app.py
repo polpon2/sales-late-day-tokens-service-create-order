@@ -57,6 +57,38 @@ async def process_rb(
                 print("GG[0]")
 
 
+async def process_complete(
+    message: aio_pika.abc.AbstractIncomingMessage,
+    connection: aio_pika.Connection,  # Add connection parameter
+) -> None:
+    try:
+        # If literally anything happens here, WHY???, well rolling back everything
+        async with message.process():
+            body: dict = json.loads(message.body)
+
+            order_id = body["order_number"]
+
+            print(f" [x] Rolling Back {body}")
+
+            async with SessionLocal() as db:
+                is_done = await crud.change_status(db, order_id=order_id, status="SUCCESS")
+
+                if is_done:
+                    # Done
+                    await db.commit();
+                    print("SUCCESS")
+                    pass
+                else:
+                    print("GG[0]")
+    except:
+        channel = await connection.channel()
+
+        await channel.default_exchange.publish(
+            aio_pika.Message(body=message.body),
+            routing_key="rb.deliver",
+        )
+
+
 async def main() -> None:
     connection = await aio_pika.connect_robust(
         "amqp://rabbit-mq",
@@ -83,11 +115,13 @@ async def main() -> None:
                                                     'x-dead-letter-routing-key' : 'dl'
                                                     })
     queue_rb = await channel.declare_queue("rb.order");
+    queue_complete = await channel.declare_queue("to.order.complete")
 
     print(' [*] Waiting for messages. To exit press CTRL+C')
 
     await queue.consume(lambda message: process_message(message, connection))
     await queue_rb.consume(lambda message: process_rb(message, connection))
+    await queue_complete.consume(lambda message: process_complete(message, connection))
 
     try:
         # Wait until terminate
