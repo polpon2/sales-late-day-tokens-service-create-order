@@ -1,4 +1,6 @@
 import asyncio, aio_pika, json
+from async_timeout import timeout
+from asyncio import TimeoutError
 from db.engine import SessionLocal, engine
 from db import crud, models
 
@@ -7,31 +9,38 @@ async def process_message(
     connection: aio_pika.Connection,  # Add connection parameter
 ) -> None:
     async with message.process():
-        body: dict = json.loads(message.body)
+        try:
+            async with timeout(1.5):
+                body: dict = json.loads(message.body)
 
-        username: str = body['username']
-        amount: int = body['amount']
+                username: str = body['username']
+                amount: int = body['amount']
 
-        print(f" [x] Received {body}")
+                print(f" [x] Received {body}")
 
-        # Create Order.
-        async with SessionLocal() as db:
-            is_created = await crud.create_order(db=db, username=username, amount=amount)
-            print(f"create order")
-            if is_created is not None:
-                routing_key = "from.order"
-                body['order_number'] = is_created.id
+                # Create Order.
+                async with SessionLocal() as db:
+                    is_created = await crud.create_order(db=db, username=username, amount=amount)
+                    print(f"create order")
+                    if is_created is not None:
+                        routing_key = "from.order"
+                        body['order_number'] = is_created.id
 
-                channel = await connection.channel()
+                        channel = await connection.channel()
 
-                await channel.default_exchange.publish(
-                    aio_pika.Message(body=bytes(json.dumps(body), 'utf-8')),
-                    routing_key=routing_key,
-                )
+                        await channel.default_exchange.publish(
+                            aio_pika.Message(body=bytes(json.dumps(body), 'utf-8')),
+                            routing_key=routing_key,
+                        )
 
-                await db.commit()
-            else:
-                print("ROLL BACK")
+                        await db.commit()
+                    else:
+                        # Nothing happens
+                        print("ROLL BACK")
+        except TimeoutError:
+            print("Timed out")
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 async def process_rb(
