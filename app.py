@@ -16,17 +16,21 @@ async def process_message(
 
         # Create Order.
         async with SessionLocal() as db:
-            await crud.create_order(db=db, username=username, amount=amount)
+            is_created = await crud.create_order(db=db, username=username, amount=amount)
             print(f"create order")
+            if is_created is not None:
+                routing_key = "from.order"
 
-        routing_key = "from.order"
+                channel = await connection.channel()
 
-        channel = await connection.channel()
+                await channel.default_exchange.publish(
+                    aio_pika.Message(body=message.body),
+                    routing_key=routing_key,
+                )
 
-        await channel.default_exchange.publish(
-            aio_pika.Message(body=message.body),
-            routing_key=routing_key,
-        )
+                await db.commit()
+            else:
+                print("ROLL BACK")
 
 
 async def main() -> None:

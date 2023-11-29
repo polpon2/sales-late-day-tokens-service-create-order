@@ -9,7 +9,7 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255))
     amount = Column(Integer)
-    status = Column(String(255));
+    status = Column(String(255), default="UNKNOWN");
 
     def __repr__(self):
         return f"<Order(username={self.username}, amount={self.amount}, status={self.status})>"
