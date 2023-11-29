@@ -20,17 +20,41 @@ async def process_message(
             print(f"create order")
             if is_created is not None:
                 routing_key = "from.order"
+                body['order_number'] = is_created.id
 
                 channel = await connection.channel()
 
                 await channel.default_exchange.publish(
-                    aio_pika.Message(body=message.body),
+                    aio_pika.Message(body=bytes(json.dumps(body), 'utf-8')),
                     routing_key=routing_key,
                 )
 
                 await db.commit()
             else:
                 print("ROLL BACK")
+
+
+async def process_rb(
+    message: aio_pika.abc.AbstractIncomingMessage,
+    connection: aio_pika.Connection,  # Add connection parameter
+) -> None:
+    async with message.process():
+        body: dict = json.loads(message.body)
+
+        order_id = body["order_number"]
+
+        print(f" [x] Rolling Back {body}")
+
+        async with SessionLocal() as db:
+            is_rolled_back = await crud.change_status(db, order_id=order_id, status=body.get("status", "UNKNOWN"))
+
+            if is_rolled_back:
+                # Done
+                await db.commit();
+                print("Rolled Back Succesfully")
+                pass
+            else:
+                print("GG[0]")
 
 
 async def main() -> None:
@@ -58,10 +82,12 @@ async def main() -> None:
                                                     'x-dead-letter-exchange' : 'dlx',
                                                     'x-dead-letter-routing-key' : 'dl'
                                                     })
+    queue_rb = await channel.declare_queue("rb.order");
 
     print(' [*] Waiting for messages. To exit press CTRL+C')
 
     await queue.consume(lambda message: process_message(message, connection))
+    await queue_rb.consume(lambda message: process_rb(message, connection))
 
     try:
         # Wait until terminate
