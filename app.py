@@ -68,8 +68,6 @@ async def process_complete(
 
             order_id = body["order_number"]
 
-            print(f" [x] Rolling Back {body}")
-
             async with SessionLocal() as db:
                 is_done = await crud.change_status(db, order_id=order_id, status="SUCCESS")
 
@@ -81,6 +79,8 @@ async def process_complete(
                 else:
                     print("GG[0]")
     except:
+        print(f" [x] Rolling Back {body}")
+
         channel = await connection.channel()
 
         await channel.default_exchange.publish(
