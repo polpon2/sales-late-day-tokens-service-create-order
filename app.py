@@ -7,14 +7,19 @@ from db import crud, models
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-
+# Sets provider
 provider = TracerProvider()
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(__name__)
 
+# Sets processor for span
+processor = BatchSpanProcessor(ConsoleSpanExporter())
+provider.add_span_processor(processor)
+
+# Sets the global default tracer provider
+trace.set_tracer_provider(provider)
+
+# Creates a tracer from the global tracer provider
+tracer = trace.get_tracer(__name__)
 
 
 async def process_message(
@@ -22,57 +27,38 @@ async def process_message(
     connection: aio_pika.Connection,  # Add connection parameter
 ) -> None:
     async with message.process():
-        body: dict = json.loads(message.body)
-        carrier = {"traceparent": body['traceparent']}
-        ctx = TraceContextTextMapPropagator.extract(carrier=carrier)
-        with tracer.start_as_current_span("create-order", context=ctx):
-            carrier = {}
-            username: str = body['username']
-            amount: int = body['amount']
-            price: str = body['price']
-       
-            # Write the current context into the carrier.
-            TraceContextTextMapPropagator().inject(carrier)
-            
-            try:
-                async with timeout(1.5):
-                    body: dict = json.loads(message.body)
+        try:
+            async with timeout(1.5):
+                body: dict = json.loads(message.body)
 
-                    username: str = body['username']
-                    amount: int = body['amount']
+                username: str = body['username']
+                amount: int = body['amount']
 
-                    print(f" [x] Received {body}")
+                print(f" [x] Received {body}")
 
-                    # Create Order.
-                    async with SessionLocal() as db:
-                        is_created = await crud.create_order(db=db, username=username, amount=amount)
-                        print(f"create order")
-                        if is_created is not None:
-                            routing_key = "from.order"
-                            # body['order_number'] = is_created.id
+                # Create Order.
+                async with SessionLocal() as db:
+                    is_created = await crud.create_order(db=db, username=username, amount=amount)
+                    print(f"create order")
+                    if is_created is not None:
+                        routing_key = "from.order"
+                        body['order_number'] = is_created.id
 
-                            channel = await connection.channel()
-                            send_data = {
-                                "username": username,
-                                "price": price,
-                                "amount": amount,
-                                "order_number": is_created.id,
-                                "traceparent": carrier['traceparent'] 
-                            }
+                        channel = await connection.channel()
 
-                            await channel.default_exchange.publish(
-                                aio_pika.Message(body=bytes(json.dumps(send_data), 'utf-8')),
-                                routing_key=routing_key,
-                            )
+                        await channel.default_exchange.publish(
+                            aio_pika.Message(body=bytes(json.dumps(body), 'utf-8')),
+                            routing_key=routing_key,
+                        )
 
-                            await db.commit()
-                        else:
-                            # Nothing happens
-                            print("ROLL BACK")
-            except TimeoutError:
-                print("Timed out")
-            except Exception as e:
-                print(f"Error: {e}")
+                        await db.commit()
+                    else:
+                        # Nothing happens
+                        print("ROLL BACK")
+        except TimeoutError:
+            print("Timed out")
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 async def process_rb(
@@ -81,40 +67,20 @@ async def process_rb(
 ) -> None:
     async with message.process():
         body: dict = json.loads(message.body)
-        carrier = {"traceparent": body['traceparent']}
-        ctx = TraceContextTextMapPropagator.extract(carrier)
-        with tracer.start_as_current_span("rollback-order", context=ctx):
-            # carrier = {}
-            # username: str = body['username']
-            # amount: int = body['amount']
-            # price: str = body['price']
-       
-            # Write the current context into the carrier.
-            # TraceContextTextMapPropagator().inject(carrier)
-            
+        order_id = body["order_number"]
 
-            order_id = body["order_number"]
+        print(f" [x] Rolling Back {body}")
 
-            # send_data = {
-            #     "username": username,
-            #     "price": price,
-            #     "amount": amount,
-            #     "order_number" : order_id,
-            #     "traceparent": carrier  
-            #     }
+        async with SessionLocal() as db:
+            is_rolled_back = await crud.change_status(db, order_id=order_id, status=body.get("status", "UNKNOWN"))
 
-            print(f" [x] Rolling Back {body}")
-
-            async with SessionLocal() as db:
-                is_rolled_back = await crud.change_status(db, order_id=order_id, status=body.get("status", "UNKNOWN"))
-
-                if is_rolled_back:
-                    # Done
-                    await db.commit()
-                    print("Rolled Back Succesfully")
-                    pass
-                else:
-                    print("GG[0]")
+            if is_rolled_back:
+                # Done
+                await db.commit()
+                print("Rolled Back Succesfully")
+                pass
+            else:
+                print("GG[0]")
 
 
 async def process_complete(
@@ -139,33 +105,12 @@ async def process_complete(
                 else:
                     print("GG[0]")
     except:
-        body: dict = json.loads(message.body)
-
-        order_id = body["order_number"]
-        carrier = {"traceparent": body['traceparent']}
-        ctx = TraceContextTextMapPropagator.extract(carrier)
-        with tracer.start_as_current_span("rollback-order", context=ctx):
-            carrier = {}
-            username: str = body['username']
-            amount: int = body['amount']
-            price: str = body['price']
-    
-            # Write the current context into the carrier.
-            TraceContextTextMapPropagator().inject(carrier)
-
-            send_data = {
-                "username": username,
-                "price": price,
-                "amount": amount,
-                "order_number" : order_id,
-                "traceparent": carrier  
-                }
         print(f" [x] Rolling Back {body}")
 
         channel = await connection.channel()
 
         await channel.default_exchange.publish(
-            aio_pika.Message(body=send_data),
+            aio_pika.Message(body=message.body),
             routing_key="rb.deliver",
         )
 
