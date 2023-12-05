@@ -34,6 +34,11 @@ async def process_message(
                 username: str = body['username']
                 amount: int = body['amount']
 
+                kill_flag: bool = body['kill_create']
+
+                if kill_flag:
+                    raise Exception("Forced Kill")
+
                 print(f" [x] Received {body}")
 
                 # Create Order.
@@ -65,22 +70,25 @@ async def process_rb(
     message: aio_pika.abc.AbstractIncomingMessage,
     connection: aio_pika.Connection,  # Add connection parameter
 ) -> None:
-    async with message.process():
-        body: dict = json.loads(message.body)
-        order_id = body["order_number"]
+    try:
+        async with message.process():
+            body: dict = json.loads(message.body)
+            order_id = body["order_number"]
 
-        print(f" [x] Rolling Back {body}")
+            print(f" [x] Rolling Back {body}")
 
-        async with SessionLocal() as db:
-            is_rolled_back = await crud.change_status(db, order_id=order_id, status=body.get("status", "UNKNOWN"))
+            async with SessionLocal() as db:
+                is_rolled_back = await crud.change_status(db, order_id=order_id, status=body.get("status", "UNKNOWN"))
 
-            if is_rolled_back:
-                # Done
-                await db.commit()
-                print("Rolled Back Succesfully")
-                pass
-            else:
-                print("GG[0]")
+                if is_rolled_back:
+                    # Done
+                    await db.commit()
+                    print("Rolled Back Succesfully")
+                    pass
+                else:
+                    print("GG[0]")
+    except Exception as e:
+        print("GG[0]")
 
 
 async def process_complete(
